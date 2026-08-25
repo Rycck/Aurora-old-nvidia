@@ -5,23 +5,47 @@ set -ouex pipefail
 # Copy the contents of system_files/ of the git repo to /
 cp -avf "/ctx/system_files"/. /
 
-### Install packages
+dnf install -y fastfetch
+dnf config-manager addrepo --from-repofile=https://negativo17.org/repos/fedora-nvidia-580.repo
+# Install the drivers
+dnf install -y \
+    nvidia-driver \
+    nvidia-driver-cuda \
+    dkms-nvidia \
+    libnvidia-fbc \
+    nvidia-persistenced \
+    libnvidia-ml
 
-# Packages can be installed from any enabled yum repo on the image.
-# RPMfusion repos are available by default in ublue main images
-# List of rpmfusion packages can be found here:
-# https://mirrors.rpmfusion.org/mirrorlist?path=free/fedora/updates/43/x86_64/repoview/index.html&protocol=https&redirect=1
+# FIX: Changed package name to dkms-nvidia to match what was installed above
+NVIDIA_VERSION=$(rpm -q --qf "%{VERSION}" dkms-nvidia)
+KERNEL_VERSION="$(find "/usr/lib/modules" -maxdepth 1 -type d ! -path "/usr/lib/modules" -exec basename '{}' ';' | sort | grep -v kabi | tail -n 1)"
 
-# this installs a package from fedora repos
-dnf5 install -y tmux
+dkms install -m nvidia -v "${NVIDIA_VERSION}" -k "${KERNEL_VERSION}"
 
-# Use a COPR Example:
-#
-# dnf5 -y copr enable ublue-os/staging
-# dnf5 -y install package
-# Disable COPRs so they don't end up enabled on the final image:
-# dnf5 -y copr disable ublue-os/staging
+# Manual compression fallback: ensures modules are compressed even if DKMS hooks fail in the container
+find "/lib/modules/${KERNEL_VERSION}/extra" -name "*.ko" -exec zstd --rm {} +
+depmod -a "${KERNEL_VERSION}"
 
-#### Example for enabling a System Unit File
+tee /usr/lib/modprobe.d/00-nouveau-blacklist.conf <<'EOF'
+blacklist nouveau
+options nouveau modeset=0
+EOF
 
-systemctl enable podman.socket
+echo nvidia >/usr/lib/modules-load.d/nvidia.conf
+echo nvidia-uvm >>/usr/lib/modules-load.d/nvidia.conf
+
+tee /usr/lib/bootc/kargs.d/00-nvidia.toml <<'EOF'
+kargs = ["rd.driver.blacklist=nouveau", "modprobe.blacklist=nouveau", "nvidia-drm.modeset=1"]
+EOF
+
+# Ensure the directory exists before running sed
+mkdir -p /usr/lib/dracut/dracut.conf.d
+touch /usr/lib/dracut/dracut.conf.d/99-nvidia.conf
+
+# we must force driver load to fix black screen on boot for nvidia desktops
+sed -i 's@omit_drivers@force_drivers@g' /usr/lib/dracut/dracut.conf.d/99-nvidia.conf
+
+# as we need forced load, also must pre-load intel/amd iGPU else chromium web browsers fail to use hardware acceleration
+sed -i 's@ nvidia @ i915 amdgpu nvidia @g' /usr/lib/dracut/dracut.conf.d/99-nvidia.conf
+
+dracut --no-hostonly --kver "$KERNEL_VERSION" --reproducible --zstd -v --add ostree -f "/lib/modules/$KERNEL_VERSION/initramfs.img"
