@@ -11,9 +11,7 @@ dnf config-manager addrepo --from-repofile=https://negativo17.org/repos/fedora-n
 # Install the drivers
 dnf install -y -x akmod-nvidia \
     --setopt=install_weak_deps=False \
-    --setopt=tsflags=noscripts \
     dkms \
-    dkms-nvidia \
     gcc-c++ \
     libnvidia-fbc \
     libva-nvidia-driver \
