@@ -8,8 +8,14 @@ cp -avf "/ctx/system_files"/. /
 dnf install -y fastfetch
 dnf config-manager addrepo --from-repofile=https://negativo17.org/repos/fedora-nvidia-580.repo
 
+dnf install -y akmods
+
+dnf install -y \
+    --setopt=tsflags=noscripts \
+    dkms-nvidia
+
 # Install the drivers
-dnf install -y -x akmod-nvidia \
+dnf install -y \
     --setopt=install_weak_deps=False \
     dkms \
     gcc-c++ \
@@ -20,6 +26,7 @@ dnf install -y -x akmod-nvidia \
     nvidia-modprobe \
     nvidia-persistenced \
     nvidia-settings
+
 
 # FIX: Changed package name to dkms-nvidia to match what was installed above
 NVIDIA_VERSION=$(rpm -q --qf "%{VERSION}" dkms-nvidia)
